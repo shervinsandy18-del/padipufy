@@ -23,3 +23,22 @@ CREATE TABLE IF NOT EXISTS subjects (
 
 CREATE INDEX IF NOT EXISTS idx_subjects_user_id ON subjects(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE TABLE IF NOT EXISTS units (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject_id UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+  unit_number INTEGER NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(subject_id, unit_number)
+);
+
+CREATE TABLE IF NOT EXISTS topics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  name VARCHAR(200) NOT NULL,
+  completed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_units_subject_id ON units(subject_id);
+CREATE INDEX IF NOT EXISTS idx_topics_unit_id ON topics(unit_id);

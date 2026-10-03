@@ -3,6 +3,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.js";
 import subjectRoutes from "./routes/subjects.js";
+import unitRoutes from "./routes/units.js";
+import topicRoutes from "./routes/topics.js";
 
 dotenv.config();
 
@@ -25,6 +27,8 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/subjects", subjectRoutes);
+app.use("/api/units", unitRoutes);
+app.use("/api/topics", topicRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Route not found." });
