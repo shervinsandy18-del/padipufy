@@ -22,7 +22,7 @@ import {
   X
 } from "lucide-react";
 import { api } from "./lib/api";
-import type { Subject, User } from "./lib/types";
+import type { Subject, Unit, Topic, User } from "./lib/types";
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -433,75 +433,902 @@ function Empty({ icon, title, text, action }: { icon: React.ReactNode; title: st
 
 function Subjects() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [show, setShow] = useState(false);
-  const [form, setForm] = useState({ name: "", courseCode: "", difficulty: "Medium", preparationPercent: 0, examDate: "" });
+  const [units, setUnits] = useState<Record<string, Unit[]>>({});
+  const [topics, setTopics] = useState<Record<string, Topic[]>>({});
+  const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
+  const [expandedUnits, setExpandedUnits] = useState<Record<string, boolean>>({});
+
+  const [showSubject, setShowSubject] = useState(false);
+  const [showUnit, setShowUnit] = useState<string | null>(null);
+  const [showTopic, setShowTopic] = useState<string | null>(null);
+
+  const [unitForm, setUnitForm] = useState({
+    unitNumber: 1,
+    name: ""
+  });
+
+  const [topicForm, setTopicForm] = useState({
+    name: ""
+  });
+
+  const [form, setForm] = useState({
+    name: "",
+    courseCode: "",
+    difficulty: "Medium",
+    preparationPercent: 0,
+    examDate: ""
+  });
+
   const [error, setError] = useState("");
 
-  async function load() {
+  async function loadSubjects() {
     const data = await api<{ subjects: Subject[] }>("/subjects");
     setSubjects(data.subjects);
   }
 
-  useEffect(() => { load().catch((err) => setError(err.message)); }, []);
+  async function loadUnits(subjectId: string) {
+    const data = await api<{ units: Unit[] }>(
+      `/units/subject/${subjectId}`
+    );
+
+    setUnits((prev) => ({
+      ...prev,
+      [subjectId]: data.units
+    }));
+
+    for (const unit of data.units) {
+      await loadTopics(unit.id);
+    }
+  }
+
+  async function loadTopics(unitId: string) {
+    const data = await api<{ topics: Topic[] }>(
+      `/topics/unit/${unitId}`
+    );
+
+    setTopics((prev) => ({
+      ...prev,
+      [unitId]: data.topics
+    }));
+  }
+
+  useEffect(() => {
+    loadSubjects().catch((err) =>
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not load subjects."
+      )
+    );
+  }, []);
+
+  async function toggleSubject(subjectId: string) {
+    const isOpen = expandedSubjects[subjectId];
+
+    setExpandedSubjects((prev) => ({
+      ...prev,
+      [subjectId]: !isOpen
+    }));
+
+    if (!isOpen && !units[subjectId]) {
+      try {
+        await loadUnits(subjectId);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not load units."
+        );
+      }
+    }
+  }
+
+  async function toggleUnit(unitId: string) {
+    const isOpen = expandedUnits[unitId];
+
+    setExpandedUnits((prev) => ({
+      ...prev,
+      [unitId]: !isOpen
+    }));
+
+    if (!isOpen && !topics[unitId]) {
+      try {
+        await loadTopics(unitId);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not load topics."
+        );
+      }
+    }
+  }
 
   async function addSubject(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+
     try {
-      await api("/subjects", { method: "POST", body: JSON.stringify(form) });
-      setForm({ name: "", courseCode: "", difficulty: "Medium", preparationPercent: 0, examDate: "" });
-      setShow(false);
-      await load();
+      await api("/subjects", {
+        method: "POST",
+        body: JSON.stringify(form)
+      });
+
+      setForm({
+        name: "",
+        courseCode: "",
+        difficulty: "Medium",
+        preparationPercent: 0,
+        examDate: ""
+      });
+
+      setShowSubject(false);
+      await loadSubjects();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add subject.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not add subject."
+      );
     }
   }
 
-  async function remove(id: string) {
-    if (!confirm("Delete this subject?")) return;
+  async function addUnit(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!showUnit) return;
+
+    setError("");
+
     try {
-      await api(`/subjects/${id}`, { method: "DELETE" });
-      await load();
+      await api(`/units/subject/${showUnit}`, {
+        method: "POST",
+        body: JSON.stringify(unitForm)
+      });
+
+      setUnitForm({
+        unitNumber: 1,
+        name: ""
+      });
+
+      const subjectId = showUnit;
+
+      setShowUnit(null);
+
+      await loadUnits(subjectId);
+
+      setExpandedSubjects((prev) => ({
+        ...prev,
+        [subjectId]: true
+      }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete subject.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not add unit."
+      );
+    }
+  }
+
+  async function addTopic(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!showTopic) return;
+
+    setError("");
+
+    try {
+      await api(`/topics/unit/${showTopic}`, {
+        method: "POST",
+        body: JSON.stringify(topicForm)
+      });
+
+      const unitId = showTopic;
+
+      setTopicForm({
+        name: ""
+      });
+
+      setShowTopic(null);
+
+      await loadTopics(unitId);
+
+      setExpandedUnits((prev) => ({
+        ...prev,
+        [unitId]: true
+      }));
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not add topic."
+      );
+    }
+  }
+
+  async function toggleTopic(topicId: string, unitId: string) {
+    try {
+      const data = await api<{ topic: Topic }>(
+        `/topics/${topicId}/toggle`,
+        {
+          method: "PATCH"
+        }
+      );
+
+      setTopics((prev) => ({
+        ...prev,
+        [unitId]: (prev[unitId] || []).map((topic) =>
+          topic.id === topicId ? data.topic : topic
+        )
+      }));
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not update topic."
+      );
+    }
+  }
+
+  async function removeTopic(topicId: string, unitId: string) {
+    if (!confirm("Delete this topic?")) return;
+
+    try {
+      await api(`/topics/${topicId}`, {
+        method: "DELETE"
+      });
+
+      await loadTopics(unitId);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not delete topic."
+      );
+    }
+  }
+
+  async function removeUnit(unitId: string, subjectId: string) {
+    if (!confirm("Delete this unit and all its topics?")) return;
+
+    try {
+      await api(`/units/${unitId}`, {
+        method: "DELETE"
+      });
+
+      setUnits((prev) => ({
+        ...prev,
+        [subjectId]: (prev[subjectId] || []).filter(
+          (unit) => unit.id !== unitId
+        )
+      }));
+
+      setTopics((prev) => {
+        const next = { ...prev };
+        delete next[unitId];
+        return next;
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not delete unit."
+      );
+    }
+  }
+
+  async function removeSubject(id: string) {
+    if (!confirm("Delete this subject?")) return;
+
+    try {
+      await api(`/subjects/${id}`, {
+        method: "DELETE"
+      });
+
+      await loadSubjects();
+
+      setUnits((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+
+      setExpandedSubjects((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not delete subject."
+      );
     }
   }
 
   return (
     <>
       <div className="page-heading">
-        <div><div className="eyebrow"><BookOpen size={16} /> Academic setup</div><h1>My subjects</h1><p>Add the subjects you want padipufy AI to organize.</p></div>
-        <button className="button primary" onClick={() => setShow(true)}><Plus size={17} /> Add subject</button>
+        <div>
+          <div className="eyebrow">
+            <BookOpen size={16} /> Academic setup
+          </div>
+
+          <h1>My subjects</h1>
+
+          <p>
+            Organize your subjects, units and topics in one place.
+          </p>
+        </div>
+
+        <button
+          className="button primary"
+          onClick={() => setShowSubject(true)}
+        >
+          <Plus size={17} /> Add subject
+        </button>
       </div>
 
       {error && <div className="error-box">{error}</div>}
 
       {subjects.length === 0 ? (
-        <div className="panel"><Empty icon={<BookOpen />} title="No subjects added" text="Add your first subject and optionally set its exam date and preparation level." action={<button className="button primary" onClick={() => setShow(true)}><Plus size={16} /> Add subject</button>} /></div>
+        <div className="panel">
+          <Empty
+            icon={<BookOpen />}
+            title="No subjects added"
+            text="Add your first subject and start building your study workspace."
+            action={
+              <button
+                className="button primary"
+                onClick={() => setShowSubject(true)}
+              >
+                <Plus size={16} /> Add subject
+              </button>
+            }
+          />
+        </div>
       ) : (
         <div className="subject-cards">
-          {subjects.map((subject) => (
-            <div className="subject-card" key={subject.id}>
-              <div className="subject-card-top"><div className="subject-icon"><BookOpen size={20} /></div><button className="text-danger" onClick={() => remove(subject.id)}>Delete</button></div>
-              <h3>{subject.name}</h3>
-              <p>{subject.course_code || "No course code"} · {subject.difficulty}</p>
-              <div className="subject-card-progress"><div><span>Preparation</span><b>{subject.preparation_percent}%</b></div><div className="progress"><i style={{ width: `${subject.preparation_percent}%` }} /></div></div>
-              <div className="exam-label"><CalendarDays size={15} /> {subject.exam_date ? `Exam: ${subject.exam_date}` : "No exam date set"}</div>
-            </div>
-          ))}
+          {subjects.map((subject) => {
+            const subjectUnits = units[subject.id] || [];
+            const isSubjectOpen = expandedSubjects[subject.id];
+
+            return (
+              <div className="subject-card" key={subject.id}>
+                <div className="subject-card-top">
+                  <div className="subject-icon">
+                    <BookOpen size={20} />
+                  </div>
+
+                  <button
+                    className="text-danger"
+                    onClick={() => removeSubject(subject.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "12px"
+                  }}
+                >
+                  <div>
+                    <h3>{subject.name}</h3>
+                    <p>
+                      {subject.course_code || "No course code"} ·{" "}
+                      {subject.difficulty}
+                    </p>
+                  </div>
+
+                  <button
+                    className="icon-button"
+                    onClick={() => toggleSubject(subject.id)}
+                    title="Show units"
+                  >
+                    <ChevronRight
+                      size={18}
+                      style={{
+                        transform: isSubjectOpen
+                          ? "rotate(90deg)"
+                          : "rotate(0deg)",
+                        transition: "transform 0.2s ease"
+                      }}
+                    />
+                  </button>
+                </div>
+
+                <div className="subject-card-progress">
+                  <div>
+                    <span>Preparation</span>
+                    <b>{subject.preparation_percent}%</b>
+                  </div>
+
+                  <div className="progress">
+                    <i
+                      style={{
+                        width: `${subject.preparation_percent}%`
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="exam-label">
+                  <CalendarDays size={15} />
+                  {subject.exam_date
+                    ? `Exam: ${subject.exam_date}`
+                    : "No exam date set"}
+                </div>
+
+                {isSubjectOpen && (
+                  <div
+                    style={{
+                      marginTop: "18px",
+                      paddingTop: "16px",
+                      borderTop: "1px solid var(--border)"
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "12px"
+                      }}
+                    >
+                      <strong>Units</strong>
+
+                      <button
+                        className="button secondary"
+                        onClick={() => {
+                          setUnitForm({
+                            unitNumber: subjectUnits.length + 1,
+                            name: ""
+                          });
+                          setShowUnit(subject.id);
+                        }}
+                      >
+                        <Plus size={15} /> Add unit
+                      </button>
+                    </div>
+
+                    {subjectUnits.length === 0 ? (
+                      <p className="muted">
+                        No units yet. Add your first unit.
+                      </p>
+                    ) : (
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: "10px"
+                        }}
+                      >
+                        {subjectUnits.map((unit) => {
+                          const unitTopics = topics[unit.id] || [];
+                          const isUnitOpen = expandedUnits[unit.id];
+
+                          return (
+                            <div
+                              key={unit.id}
+                              style={{
+                                border: "1px solid var(--border)",
+                                borderRadius: "14px",
+                                padding: "13px",
+                                background:
+                                  "rgba(255,255,255,0.45)"
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: "10px"
+                                }}
+                              >
+                                <button
+                                  className="icon-button"
+                                  onClick={() =>
+                                    toggleUnit(unit.id)
+                                  }
+                                >
+                                  <ChevronRight
+                                    size={16}
+                                    style={{
+                                      transform: isUnitOpen
+                                        ? "rotate(90deg)"
+                                        : "rotate(0deg)",
+                                      transition:
+                                        "transform 0.2s ease"
+                                    }}
+                                  />
+                                </button>
+
+                                <div
+                                  style={{
+                                    flex: 1,
+                                    cursor: "pointer"
+                                  }}
+                                  onClick={() =>
+                                    toggleUnit(unit.id)
+                                  }
+                                >
+                                  <strong>
+                                    Unit {unit.unit_number}
+                                  </strong>
+
+                                  <div className="muted">
+                                    {unit.name}
+                                  </div>
+                                </div>
+
+                                <button
+                                  className="text-danger"
+                                  onClick={() =>
+                                    removeUnit(
+                                      unit.id,
+                                      subject.id
+                                    )
+                                  }
+                                >
+                                  Delete
+                                </button>
+                              </div>
+
+                              {isUnitOpen && (
+                                <div
+                                  style={{
+                                    marginTop: "12px",
+                                    paddingTop: "12px",
+                                    borderTop:
+                                      "1px solid var(--border)"
+                                  }}
+                                >
+                                  <button
+                                    className="button ghost"
+                                    onClick={() =>
+                                      setShowTopic(unit.id)
+                                    }
+                                  >
+                                    <Plus size={14} /> Add topic
+                                  </button>
+
+                                  {unitTopics.length === 0 ? (
+                                    <p
+                                      className="muted"
+                                      style={{
+                                        marginTop: "10px"
+                                      }}
+                                    >
+                                      No topics yet.
+                                    </p>
+                                  ) : (
+                                    <div
+                                      style={{
+                                        display: "grid",
+                                        gap: "7px",
+                                        marginTop: "10px"
+                                      }}
+                                    >
+                                      {unitTopics.map((topic) => (
+                                        <div
+                                          key={topic.id}
+                                          style={{
+                                            display: "flex",
+                                            alignItems:
+                                              "center",
+                                            gap: "9px"
+                                          }}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={
+                                              topic.completed
+                                            }
+                                            onChange={() =>
+                                              toggleTopic(
+                                                topic.id,
+                                                unit.id
+                                              )
+                                            }
+                                          />
+
+                                          <span
+                                            style={{
+                                              flex: 1,
+                                              textDecoration:
+                                                topic.completed
+                                                  ? "line-through"
+                                                  : "none",
+                                              opacity:
+                                                topic.completed
+                                                  ? 0.6
+                                                  : 1
+                                            }}
+                                          >
+                                            {topic.name}
+                                          </span>
+
+                                          <button
+                                            className="text-danger"
+                                            onClick={() =>
+                                              removeTopic(
+                                                topic.id,
+                                                unit.id
+                                              )
+                                            }
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {show && (
-        <div className="modal-backdrop" onMouseDown={() => setShow(false)}>
-          <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="modal-heading"><div><h2>Add subject</h2><p>Set the basics now; units and topics come next.</p></div><button className="icon-button" onClick={() => setShow(false)}><X /></button></div>
+      {showSubject && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={() => setShowSubject(false)}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <div>
+                <h2>Add subject</h2>
+                <p>Set up your subject before adding units.</p>
+              </div>
+
+              <button
+                className="icon-button"
+                onClick={() => setShowSubject(false)}
+              >
+                <X />
+              </button>
+            </div>
+
             <form onSubmit={addSubject}>
-              <label>Subject name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Data Structures" /></label>
-              <div className="form-row"><label>Course code<input value={form.courseCode} onChange={(e) => setForm({ ...form, courseCode: e.target.value })} placeholder="18CSC201J" /></label><label>Difficulty<select value={form.difficulty} onChange={(e) => setForm({ ...form, difficulty: e.target.value })}><option>Easy</option><option>Medium</option><option>Hard</option></select></label></div>
-              <label>Exam date<input type="date" value={form.examDate} onChange={(e) => setForm({ ...form, examDate: e.target.value })} /></label>
-              <label>Current preparation: {form.preparationPercent}%<input type="range" min="0" max="100" value={form.preparationPercent} onChange={(e) => setForm({ ...form, preparationPercent: Number(e.target.value) })} /></label>
-              <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setShow(false)}>Cancel</button><button className="button primary">Save subject</button></div>
+              <label>
+                Subject name
+                <input
+                  required
+                  value={form.name}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      name: e.target.value
+                    })
+                  }
+                  placeholder="Data Structures"
+                />
+              </label>
+
+              <div className="form-row">
+                <label>
+                  Course code
+                  <input
+                    value={form.courseCode}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        courseCode: e.target.value
+                      })
+                    }
+                    placeholder="18CSC201J"
+                  />
+                </label>
+
+                <label>
+                  Difficulty
+                  <select
+                    value={form.difficulty}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        difficulty: e.target.value
+                      })
+                    }
+                  >
+                    <option>Easy</option>
+                    <option>Medium</option>
+                    <option>Hard</option>
+                  </select>
+                </label>
+              </div>
+
+              <label>
+                Exam date
+                <input
+                  type="date"
+                  value={form.examDate}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      examDate: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Current preparation:{" "}
+                {form.preparationPercent}%
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={form.preparationPercent}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      preparationPercent:
+                        Number(e.target.value)
+                    })
+                  }
+                />
+              </label>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={() => setShowSubject(false)}
+                >
+                  Cancel
+                </button>
+
+                <button className="button primary">
+                  Save subject
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showUnit && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={() => setShowUnit(null)}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <div>
+                <h2>Add unit</h2>
+                <p>Add a unit to this subject.</p>
+              </div>
+
+              <button
+                className="icon-button"
+                onClick={() => setShowUnit(null)}
+              >
+                <X />
+              </button>
+            </div>
+
+            <form onSubmit={addUnit}>
+              <label>
+                Unit number
+                <input
+                  required
+                  type="number"
+                  min="1"
+                  value={unitForm.unitNumber}
+                  onChange={(e) =>
+                    setUnitForm({
+                      ...unitForm,
+                      unitNumber: Number(e.target.value)
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Unit name
+                <input
+                  required
+                  value={unitForm.name}
+                  onChange={(e) =>
+                    setUnitForm({
+                      ...unitForm,
+                      name: e.target.value
+                    })
+                  }
+                  placeholder="Introduction to Data Structures"
+                />
+              </label>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={() => setShowUnit(null)}
+                >
+                  Cancel
+                </button>
+
+                <button className="button primary">
+                  Save unit
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showTopic && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={() => setShowTopic(null)}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <div>
+                <h2>Add topic</h2>
+                <p>Add a topic to this unit.</p>
+              </div>
+
+              <button
+                className="icon-button"
+                onClick={() => setShowTopic(null)}
+              >
+                <X />
+              </button>
+            </div>
+
+            <form onSubmit={addTopic}>
+              <label>
+                Topic name
+                <input
+                  required
+                  value={topicForm.name}
+                  onChange={(e) =>
+                    setTopicForm({
+                      name: e.target.value
+                    })
+                  }
+                  placeholder="Abstract Data Types"
+                />
+              </label>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={() => setShowTopic(null)}
+                >
+                  Cancel
+                </button>
+
+                <button className="button primary">
+                  Save topic
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -509,7 +1336,6 @@ function Subjects() {
     </>
   );
 }
-
 function Profile({ user, setUser }: { user: User; setUser: (u: User) => void }) {
   const [form, setForm] = useState({
     fullName: user.fullName,
