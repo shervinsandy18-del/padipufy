@@ -4,7 +4,7 @@ export async function api<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = localStorage.getItem("studymate_token");
+  const token = localStorage.getItem("padipufy_token");
 
   const headers = new Headers(options.headers);
 
