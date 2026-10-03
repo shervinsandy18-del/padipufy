@@ -42,3 +42,23 @@ CREATE TABLE IF NOT EXISTS topics (
 
 CREATE INDEX IF NOT EXISTS idx_units_subject_id ON units(subject_id);
 CREATE INDEX IF NOT EXISTS idx_topics_unit_id ON topics(unit_id);
+CREATE TABLE IF NOT EXISTS study_materials (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  subject_id UUID REFERENCES subjects(id) ON DELETE CASCADE,
+  unit_id UUID REFERENCES units(id) ON DELETE CASCADE,
+  title VARCHAR(200) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_url TEXT NOT NULL,
+  file_type VARCHAR(50) NOT NULL DEFAULT 'application/pdf',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_study_materials_user_id
+ON study_materials(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_study_materials_subject_id
+ON study_materials(subject_id);
+
+CREATE INDEX IF NOT EXISTS idx_study_materials_unit_id
+ON study_materials(unit_id);

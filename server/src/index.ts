@@ -5,6 +5,7 @@ import authRoutes from "./routes/auth.js";
 import subjectRoutes from "./routes/subjects.js";
 import unitRoutes from "./routes/units.js";
 import topicRoutes from "./routes/topics.js";
+import materialRoutes from "./routes/materials.js";
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/subjects", subjectRoutes);
 app.use("/api/units", unitRoutes);
 app.use("/api/topics", topicRoutes);
+app.use("/api/materials", materialRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Route not found." });
