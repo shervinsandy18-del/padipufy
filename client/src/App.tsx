@@ -21,6 +21,8 @@ import {
   UserCircle,
   X
 } from "lucide-react";
+const CLOUDINARY_CLOUD_NAME = "v2ykt0h0";
+const CLOUDINARY_UPLOAD_PRESET = "padipufy_pdf";
 import { api } from "./lib/api";
 import type { Subject, Unit, Topic, User } from "./lib/types";
 
@@ -89,6 +91,18 @@ function App() {
           )
         }
       />
+      <Route
+  path="/materials"
+  element={
+    user ? (
+      <AppShell user={user} setUser={setUser}>
+        <StudyMaterials />
+      </AppShell>
+    ) : (
+      <Navigate to="/login" replace />
+    )
+  }
+/>
       <Route
         path="*"
         element={<Navigate to={user ? "/dashboard" : "/"} replace />}
@@ -285,7 +299,7 @@ function AppShell({ user, setUser, children }: { user: User; setUser: (user: Use
   const links = [
     ["/dashboard", LayoutDashboard, "Dashboard"],
     ["/subjects", BookOpen, "My Subjects"],
-    ["#", FileText, "Study Materials"],
+    ["/materials", FileText, "Study Materials"],
     ["#", FileQuestion, "PYQ Analysis"],
     ["#", Brain, "AI Tutor"],
     ["#", CalendarDays, "Study Planner"],
@@ -1327,6 +1341,341 @@ function Subjects() {
 
                 <button className="button primary">
                   Save topic
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+function StudyMaterials() {
+  const [materials, setMaterials] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [units, setUnits] = useState<Record<string, Unit[]>>({});
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState("");
+  const [fileUrl, setFileUrl] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileType, setFileType] = useState("application/pdf");
+  const [subjectId, setSubjectId] = useState("");
+  const [unitId, setUnitId] = useState("");
+  const [error, setError] = useState("");
+
+  async function loadMaterials() {
+    const data = await api<{ materials: any[] }>("/materials");
+    setMaterials(data.materials);
+  }
+
+  async function loadSubjects() {
+    const data = await api<{ subjects: Subject[] }>("/subjects");
+    setSubjects(data.subjects);
+  }
+
+  async function loadUnits(subject: string) {
+    if (!subject) {
+      setUnits({});
+      return;
+    }
+
+    const data = await api<{ units: Unit[] }>(
+      `/units/subject/${subject}`
+    );
+
+    setUnits((prev) => ({
+      ...prev,
+      [subject]: data.units
+    }));
+  }
+
+  useEffect(() => {
+    Promise.all([loadMaterials(), loadSubjects()]).catch((err) =>
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not load study materials."
+      )
+    );
+  }, []);
+
+  async function addMaterial(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+
+   try {
+  if (!selectedFile) {
+    throw new Error("Please choose a PDF file.");
+  }
+
+  const cloudinaryData = new FormData();
+  cloudinaryData.append("file", selectedFile);
+  cloudinaryData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+
+  const uploadResponse = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
+    {
+      method: "POST",
+      body: cloudinaryData
+    }
+  );
+
+  const uploadedFile = await uploadResponse.json();
+
+  if (!uploadResponse.ok) {
+    throw new Error(
+      uploadedFile?.error?.message || "Could not upload PDF."
+    );
+  }
+
+  await api("/materials", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          fileName: uploadedFile.original_filename || fileName,
+          fileUrl: uploadedFile.secure_url,
+          fileType,
+          subjectId: subjectId || null,
+          unitId: unitId || null
+        })
+      });
+
+      setTitle("");
+      setFileUrl("");
+      setFileName("");
+      setFileType("application/pdf");
+      setSubjectId("");
+      setUnitId("");
+      setShowForm(false);
+
+      await loadMaterials();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not add study material."
+      );
+    }
+  }
+
+  async function removeMaterial(id: string) {
+    if (!confirm("Delete this study material?")) return;
+
+    try {
+      await api(`/materials/${id}`, {
+        method: "DELETE"
+      });
+
+      await loadMaterials();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not delete study material."
+      );
+    }
+  }
+
+  const selectedUnits = subjectId ? units[subjectId] || [] : [];
+
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">
+            <FileText size={16} /> Study resources
+          </div>
+
+          <h1>Study Materials</h1>
+
+          <p>
+            Keep your notes, PDFs and learning resources organized by subject
+            and unit.
+          </p>
+        </div>
+
+        <button
+          className="button primary"
+          onClick={() => setShowForm(true)}
+        >
+          <Plus size={17} /> Add material
+        </button>
+      </div>
+
+      {error && <div className="error-box">{error}</div>}
+
+      {materials.length === 0 ? (
+        <div className="panel">
+          <Empty
+            icon={<FileText />}
+            title="No study materials yet"
+            text="Add your first PDF, note or learning resource."
+            action={
+              <button
+                className="button primary"
+                onClick={() => setShowForm(true)}
+              >
+                <Plus size={16} /> Add material
+              </button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="subject-cards">
+          {materials.map((material) => (
+            <div className="subject-card" key={material.id}>
+              <div className="subject-card-top">
+                <div className="subject-icon">
+                  <FileText size={20} />
+                </div>
+
+                <button
+                  className="text-danger"
+                  onClick={() => removeMaterial(material.id)}
+                >
+                  Delete
+                </button>
+              </div>
+
+              <h3>{material.title}</h3>
+
+              <p>
+                {material.subject_name || "No subject"}{" "}
+                ·{" "}
+                {material.unit_name
+                  ? `Unit ${material.unit_number} · ${material.unit_name}`
+                  : "No unit"}
+              </p>
+
+              <div className="exam-label">
+                <FileText size={15} />
+                {material.file_name}
+              </div>
+
+              <div style={{ marginTop: "14px" }}>
+                <a
+                  className="button secondary"
+                  href={material.file_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open material
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={() => setShowForm(false)}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <div>
+                <h2>Add study material</h2>
+                <p>Add a resource to your study workspace.</p>
+              </div>
+
+              <button
+                className="icon-button"
+                onClick={() => setShowForm(false)}
+              >
+                <X />
+              </button>
+            </div>
+
+            <form onSubmit={addMaterial}>
+              <label>
+                Material title
+                <input
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Data Structures Unit 1 Notes"
+                />
+              </label>
+
+             <label>
+  Choose PDF
+  <input
+    required
+    type="file"
+    accept="application/pdf"
+    onChange={(e) => {
+      const file = e.target.files?.[0] || null;
+      setSelectedFile(file);
+      setFileName(file?.name || "");
+      setFileType(file?.type || "application/pdf");
+    }}
+  />
+</label>
+
+
+              <label>
+                Subject
+                <select
+                  value={subjectId}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSubjectId(value);
+                    setUnitId("");
+
+                    if (value) {
+                      loadUnits(value).catch((err) =>
+                        setError(
+                          err instanceof Error
+                            ? err.message
+                            : "Could not load units."
+                        )
+                      );
+                    }
+                  }}
+                >
+                  <option value="">No subject</option>
+
+                  {subjects.map((subject) => (
+                    <option key={subject.id} value={subject.id}>
+                      {subject.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Unit
+                <select
+                  value={unitId}
+                  onChange={(e) => setUnitId(e.target.value)}
+                  disabled={!subjectId}
+                >
+                  <option value="">No unit</option>
+
+                  {selectedUnits.map((unit) => (
+                    <option key={unit.id} value={unit.id}>
+                      Unit {unit.unit_number} · {unit.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={() => setShowForm(false)}
+                >
+                  Cancel
+                </button>
+
+                <button className="button primary">
+                  Save material
                 </button>
               </div>
             </form>

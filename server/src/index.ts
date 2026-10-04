@@ -12,9 +12,17 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT || 5000);
 
-app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:5173"
-}));
+app.use(
+  cors({
+    origin: [
+      process.env.CLIENT_URL || "http://localhost:5173",
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+      "http://localhost:5176"
+    ]
+  })
+);
 
 app.use(express.json({ limit: "1mb" }));
 
