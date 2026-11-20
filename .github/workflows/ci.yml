@@ -77,3 +77,140 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+  render-production:
+    name: Verify Render production deployment
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - diff-check
+      - backend
+      - frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for the deployment of this commit to become live
+        uses: actions/github-script@v7
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        with:
+          script: |
+            const expectedSha = process.env.GITHUB_SHA;
+            const apiKey = process.env.RENDER_API_KEY;
+            const serviceId = process.env.RENDER_SERVICE_ID;
+
+            if (!apiKey || !serviceId) {
+              core.setFailed(`Render verification cannot check commit ${expectedSha}: configure the RENDER_API_KEY and RENDER_SERVICE_ID Actions secrets.`);
+              return;
+            }
+
+            const endpoint = `https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys?limit=100`;
+            const timeoutMs = 20 * 60 * 1000;
+            const pollIntervalMs = 30 * 1000;
+            const deadline = Date.now() + timeoutMs;
+            const terminalStatuses = new Set([
+              "build_failed",
+              "update_failed",
+              "pre_deploy_failed",
+              "canceled",
+              "deactivated"
+            ]);
+            let lastReportedStatus = "";
+
+            core.info(`Waiting for Render to report commit ${expectedSha} as live.`);
+
+            while (Date.now() < deadline) {
+              let cursor;
+              let retryAfterTransientError = false;
+              const seenCursors = new Set();
+
+              while (Date.now() < deadline) {
+                const pageUrl = new URL(endpoint);
+                if (cursor) pageUrl.searchParams.set("cursor", cursor);
+
+                let response;
+                try {
+                  response = await fetch(pageUrl, {
+                    method: "GET",
+                    headers: {
+                      Accept: "application/json",
+                      Authorization: `Bearer ${apiKey}`
+                    }
+                  });
+                } catch {
+                  core.warning(`Render API request failed while checking commit ${expectedSha}; retrying.`);
+                  retryAfterTransientError = true;
+                  break;
+                }
+
+                if (response.status === 429 || response.status >= 500) {
+                  core.warning(`Render API returned HTTP ${response.status} while checking commit ${expectedSha}; retrying.`);
+                  retryAfterTransientError = true;
+                  break;
+                }
+
+                if (!response.ok) {
+                  core.setFailed(`Render API returned HTTP ${response.status} while checking commit ${expectedSha}. Verify the configured Actions secrets and service access.`);
+                  return;
+                }
+
+                let entries;
+                try {
+                  entries = await response.json();
+                } catch {
+                  core.setFailed(`Render API returned invalid JSON while checking commit ${expectedSha}.`);
+                  return;
+                }
+
+                if (!Array.isArray(entries) || entries.some(entry =>
+                  !entry || typeof entry !== "object" ||
+                  !entry.deploy || typeof entry.deploy !== "object" ||
+                  typeof entry.cursor !== "string"
+                )) {
+                  core.setFailed(`Render API returned an unexpected response while checking commit ${expectedSha}.`);
+                  return;
+                }
+
+                const matches = entries
+                  .map(entry => entry.deploy)
+                  .filter(deploy => typeof deploy?.commit?.id === "string" &&
+                    deploy.commit.id.toLowerCase() === expectedSha.toLowerCase())
+                  .sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
+                const deployment = matches[0];
+
+                if (deployment) {
+                  const status = deployment.status;
+                  if (status !== lastReportedStatus) {
+                    core.info(`Render deployment for commit ${expectedSha} is ${status || "in an unknown state"}.`);
+                    lastReportedStatus = status;
+                  }
+
+                  if (status === "live" && deployment.commit.id.toLowerCase() === expectedSha.toLowerCase()) {
+                    core.info(`Render production deployment is live for verified commit ${expectedSha}.`);
+                    return;
+                  }
+
+                  if (terminalStatuses.has(status)) {
+                    core.setFailed(`Render deployment for commit ${expectedSha} reached terminal status ${status}; it did not become live.`);
+                    return;
+                  }
+
+                  break;
+                }
+
+                if (entries.length === 0) break;
+
+                const nextCursor = entries[entries.length - 1].cursor;
+                if (seenCursors.has(nextCursor)) {
+                  core.setFailed(`Render API returned a repeated pagination cursor while checking commit ${expectedSha}.`);
+                  return;
+                }
+                seenCursors.add(nextCursor);
+                cursor = nextCursor;
+              }
+
+              if (retryAfterTransientError || Date.now() < deadline) {
+                await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+              }
+            }
+
+            core.setFailed(`Timed out waiting for the Render deployment for commit ${expectedSha} to become live.`);
